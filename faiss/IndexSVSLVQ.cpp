@@ -1,0 +1,92 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+#include <variant>
+#include "faiss/IndexSVSLVQ.h"
+#include "svs/orchestrators/dynamic_vamana.h"
+
+namespace faiss {
+
+IndexSVSLVQ::IndexSVSLVQ(idx_t d, MetricType metric, LVQLevel lvq_level)
+        : IndexSVS(d, metric), lvq_level{lvq_level} {}
+
+IndexSVSLVQ::~IndexSVSLVQ() {}
+
+void IndexSVSLVQ::init_impl(idx_t n, const float* x) {
+
+    // TODO: support ConstSimpleDataView in SVS shared/static lib
+    const auto data =
+            svs::data::SimpleDataView<float>(const_cast<float*>(x), n, d);
+    std::vector<size_t> labels(n);
+    auto threadpool = svs::threads::as_threadpool(num_threads);
+
+    std::variant<std::monostate, storage_type_4x0, storage_type_4x4, storage_type_4x8> compressed_data;
+
+    switch (lvq_level) {
+        case LVQLevel::LVQ_4x0:
+            compressed_data = storage_type_4x0::compress(data, threadpool, 0, blocked_alloc_type{});
+            break;
+        case LVQLevel::LVQ_4x4:
+            compressed_data = storage_type_4x4::compress(data, threadpool, 0, blocked_alloc_type{});
+            break;
+        case LVQLevel::LVQ_4x8:
+            compressed_data = storage_type_4x8::compress(data, threadpool, 0, blocked_alloc_type{});
+            break;
+        default:
+            FAISS_ASSERT(!"not supported SVS LVQ level");
+    }
+
+
+    svs::threads::parallel_for(
+            threadpool,
+            svs::threads::StaticPartition(n),
+            [&](auto is, auto SVS_UNUSED(tid)) {
+                for (auto i : is) {
+                    labels[i] = ntotal + i;
+                }
+            });
+    ntotal += n;
+
+    svs::index::vamana::VamanaBuildParameters build_parameters{
+            alpha,
+            graph_max_degree,
+            construction_window_size,
+            max_candidate_pool_size,
+            prune_to,
+            use_full_search_history};
+
+    std::visit([&](auto&& storage) {
+        if constexpr (std::is_same_v<std::decay_t<decltype(storage)>, std::monostate>) {
+            FAISS_ASSERT(!"SVS LVQ data is not initialized.");
+        }
+        else {
+            switch (metric_type) {
+                case METRIC_INNER_PRODUCT:
+                    impl = new svs::DynamicVamana(svs::DynamicVamana::build<float>(
+                            std::move(build_parameters),
+                            std::forward<decltype(storage)>(storage),
+                            std::move(labels),
+                            svs::DistanceIP(),
+                            std::move(threadpool)));
+                    break;
+                case METRIC_L2:
+                    impl = new svs::DynamicVamana(svs::DynamicVamana::build<float>(
+                            std::move(build_parameters),
+                            std::forward<decltype(storage)>(storage),
+                            std::move(labels),
+                            svs::DistanceL2(),
+                            std::move(threadpool)));
+                    break;
+                default:
+                    FAISS_ASSERT(!"not supported SVS distance");
+            }
+        }
+    }, compressed_data);
+
+}
+
+} // namespace faiss

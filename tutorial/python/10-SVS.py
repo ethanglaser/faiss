@@ -42,11 +42,13 @@ print(I[-5:])                  # neighbors of the 5 last queries
 import faiss
 import svs
 
-idx = faiss.IndexSVSFlat(d, faiss.METRIC_L2)
-idx.add(xb)
-D, I = idx.search(xq, 4)
-print(I)
+idx = faiss.IndexSVSLVQ(d, faiss.METRIC_L2, faiss.LVQ_4x8)
 
-idx = svs.Flat(xb, svs.DistanceType.L2)
-I, D = idx.search(xq, 4)
-print(I)
+# idx = faiss.IndexSVSFlat(d, faiss.METRIC_L2)
+# idx.add(xb)
+# D, I = idx.search(xq, 4)
+# print(I)
+
+# idx = svs.Flat(xb, svs.DistanceType.L2)
+# I, D = idx.search(xq, 4)
+# print(I)
