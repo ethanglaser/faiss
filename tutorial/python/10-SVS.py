@@ -18,10 +18,6 @@ import faiss                        # make faiss available
 index = faiss.IndexSVS(d)           # build the index (DynamicVamana, float32)
 index.num_threads = 72
 
-# index = faiss.IndexSVSFlat(d)     # build the SVSFlat index
-# index = faiss.IndexSVSLVQ(d)      # build the SVSLVQ index, quantization parameters
-# index = faiss.IndexSVSLeanVec(d)   # build the SVSLeanVec index, quantization parameters
-
 print(index.is_trained)
 index.add(xb)                  # add vectors to the index
 print(index.ntotal)
@@ -46,6 +42,5 @@ print(f"{k} nearest neighbors of the 5 first query vectors (after reloading)")
 print(I[:5])                   # neighbors of the 5 first queries
 print(f"{k} nearest neighbors of the 5 last query vectors (after reloading)")
 print(I[-5:])                  # neighbors of the 5 last queries
-
 
 example_lvq_idx = faiss.IndexSVSLVQ(d, faiss.METRIC_L2, faiss.LVQ_4x8)
