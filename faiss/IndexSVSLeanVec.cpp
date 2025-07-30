@@ -8,6 +8,7 @@
 #include <variant>
 #include <faiss/IndexSVSLeanVec.h>
 #include "svs/orchestrators/dynamic_vamana.h"
+#include "svs/core/medioid.h"
 
 namespace faiss {
 
