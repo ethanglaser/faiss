@@ -39,6 +39,8 @@ struct IndexSVSLVQ : IndexSVS {
 
     void init_impl(idx_t n, const float* x) override;
 
+    void deserialize_impl(std::istream& in) override;
+
     LVQLevel lvq_level;
 };
 
