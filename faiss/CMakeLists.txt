@@ -339,23 +339,45 @@ if(NOT WIN32)
   endif()
 endif()
 
+set(SVS_SHARED_LIB OFF)
+#set(SVS_SHARED_LIB ON)
+
 if(FAISS_ENABLE_SVS)
   include(FetchContent)
-  set(SVS_URL "https://github.com/intel/ScalableVectorSearch/releases/download/v1.0.0-dev/svs-shared-library-1.0.0-NIGHTLY-20250820.tar.gz")
-  FetchContent_Declare(
+  if (SVS_SHARED_LIB)
+    message(STATUS "Building SVS from shared library")
+    set(SVS_URL "https://github.com/intel/ScalableVectorSearch/releases/download/v1.0.0-dev/svs-shared-library-1.0.0-NIGHTLY-20250820.tar.gz")
+    FetchContent_Declare(
       svs
       URL "${SVS_URL}"
-  )
-  FetchContent_MakeAvailable(svs)
-  list(APPEND CMAKE_PREFIX_PATH "${svs_SOURCE_DIR}")
-  find_package(svs REQUIRED)
-  target_compile_options(svs::svs INTERFACE "-DSVS_ENABLE_OMP=1")
+    )
+    FetchContent_MakeAvailable(svs)
+    list(APPEND CMAKE_PREFIX_PATH "${svs_SOURCE_DIR}")
+    find_package(svs REQUIRED)
+    target_compile_options(svs::svs INTERFACE "-DSVS_ENABLE_OMP=1")
 
-  target_link_libraries(faiss PUBLIC svs::svs svs::svs_shared_library)
-  target_link_libraries(faiss_avx2 PUBLIC svs::svs svs::svs_shared_library)
-  target_link_libraries(faiss_avx512 PUBLIC svs::svs svs::svs_shared_library)
-  target_link_libraries(faiss_avx512_spr PUBLIC svs::svs svs::svs_shared_library)
-  target_link_libraries(faiss_sve PUBLIC svs::svs svs::svs_shared_library)
+    target_link_libraries(faiss PUBLIC svs::svs svs::svs_shared_library)
+    target_link_libraries(faiss_avx2 PUBLIC svs::svs svs::svs_shared_library)
+    target_link_libraries(faiss_avx512 PUBLIC svs::svs svs::svs_shared_library)
+    target_link_libraries(faiss_avx512_spr PUBLIC svs::svs svs::svs_shared_library)
+    target_link_libraries(faiss_sve PUBLIC svs::svs svs::svs_shared_library)
+  else()
+    message(STATUS "Building SVS from sources")
+    FetchContent_Declare(
+      svs
+      #GIT_REPOSITORY https://github.com/intel/ScalableVectorSearch
+      #GIT_TAG main
+      SOURCE_DIR /raid6/ishwarsi/projects/svs_temp_faiss
+    )
+    FetchContent_MakeAvailable(svs)
+    target_compile_options(svs_export INTERFACE "-DSVS_ENABLE_OMP=1")
+
+    target_link_libraries(faiss PUBLIC svs::svs)
+    target_link_libraries(faiss_avx2 PUBLIC svs::svs)
+    target_link_libraries(faiss_avx512 PUBLIC svs::svs)
+    target_link_libraries(faiss_avx512_spr PUBLIC svs::svs)
+    target_link_libraries(faiss_sve PUBLIC svs::svs svs::svs)
+  endif()
 endif()
 
 # Handle `#include <faiss/foo.h>`.

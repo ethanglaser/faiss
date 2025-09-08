@@ -9,7 +9,8 @@
 
 #include <faiss/IndexSVSVamana.h>
 
-#include <svs/extensions/vamana/lvq.h>
+//#include <svs/extensions/vamana/lvq.h>
+#include <svs/quantization/lvq/impl/lvq_impl.h>
 #include <svs/quantization/scalar/scalar.h>
 
 namespace faiss {
