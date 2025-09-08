@@ -367,7 +367,7 @@ if(FAISS_ENABLE_SVS)
       svs
       #GIT_REPOSITORY https://github.com/intel/ScalableVectorSearch
       #GIT_TAG main
-      SOURCE_DIR /raid6/ishwarsi/projects/svs_temp_faiss
+      SOURCE_DIR <SVS_SOURCE_DIR> # For testing with local copy of SVS
     )
     FetchContent_MakeAvailable(svs)
     target_compile_options(svs_export INTERFACE "-DSVS_ENABLE_OMP=1")
