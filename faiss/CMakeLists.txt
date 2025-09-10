@@ -363,11 +363,12 @@ if(FAISS_ENABLE_SVS)
     target_link_libraries(faiss_sve PUBLIC svs::svs svs::svs_shared_library)
   else()
     message(STATUS "Building SVS from sources")
+    set(SVS_SOURCE_DIR "../../../svs" CACHE PATH "SVS source dir")
     FetchContent_Declare(
       svs
       #GIT_REPOSITORY https://github.com/intel/ScalableVectorSearch
       #GIT_TAG main
-      SOURCE_DIR <SVS_SOURCE_DIR> # For testing with local copy of SVS
+      SOURCE_DIR "${SVS_SOURCE_DIR}"
     )
     FetchContent_MakeAvailable(svs)
     target_compile_options(svs_export INTERFACE "-DSVS_ENABLE_OMP=1")
