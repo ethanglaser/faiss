@@ -16,162 +16,29 @@
 #include <faiss/impl/IDSelector.h>
 
 namespace faiss {
+
 namespace {
-std::variant<svs::DistanceIP, svs::DistanceL2> get_svs_distance(
-        faiss::MetricType metric) {
-    switch (metric) {
-        case METRIC_INNER_PRODUCT:
-            return svs::DistanceIP();
-        case METRIC_L2:
-            return svs::DistanceL2();
-        default:
-            FAISS_ASSERT(!"not supported SVS distance");
-    }
-}
-
-std::variant<float, svs::Float16, std::int8_t> get_storage_variant(
-        IndexSVSVamana::StorageKind kind) {
-    switch (kind) {
-        case IndexSVSVamana::StorageKind::FP32:
-            return float{};
-        case IndexSVSVamana::StorageKind::FP16:
-            return svs::Float16{};
-        case IndexSVSVamana::StorageKind::SQI8:
-            return std::int8_t{};
-        default:
-            FAISS_ASSERT(!"not supported SVS storage kind");
-    }
-}
-
-svs::index::vamana::VamanaBuildParameters get_build_parameters(
-        const IndexSVSVamana& index) {
-    return svs::index::vamana::VamanaBuildParameters{
-            index.alpha,
-            index.graph_max_degree,
-            index.construction_window_size,
-            index.max_candidate_pool_size,
-            index.prune_to,
-            index.use_full_search_history};
-}
-
-template <
-        typename T,
-        typename Alloc = svs::data::Blocked<svs::lib::Allocator<T>>,
-        svs::data::ImmutableMemoryDataset Dataset,
-        svs::threads::ThreadPool Pool>
-    requires std::is_floating_point_v<T> || std::is_same_v<T, svs::Float16>
-svs::data::SimpleData<T, svs::Dynamic, Alloc> make_storage(
-        const Dataset& data,
-        Pool& pool) {
-    svs::data::SimpleData<T, svs::Dynamic, Alloc> result(
-            data.size(), data.dimensions(), Alloc{});
-    svs::threads::parallel_for(
-            pool,
-            svs::threads::StaticPartition(result.size()),
-            [&](auto is, auto SVS_UNUSED(tid)) {
-                for (auto i : is) {
-                    result.set_datum(i, data.get_datum(i));
-                }
-            });
-    return result;
-}
-
-template <
-        typename T,
-        typename Alloc = svs::data::Blocked<svs::lib::Allocator<T>>,
-        svs::data::ImmutableMemoryDataset Dataset,
-        svs::threads::ThreadPool Pool>
-    requires std::is_integral_v<T>
-svs::quantization::scalar::SQDataset<T, svs::Dynamic, Alloc> make_storage(
-        const Dataset& data,
-        Pool& pool) {
-    return svs::quantization::scalar::SQDataset<T, svs::Dynamic, Alloc>::
-            compress(data, pool, Alloc{});
-}
-
-template <typename ElementType>
-svs::DynamicVamana* init_impl_t(
-        IndexSVSVamana* index,
-        faiss::MetricType metric,
-        idx_t n,
-        const float* x) {
-    auto threadpool = svs::threads::ThreadPoolHandle(
-            svs::threads::OMPThreadPool(omp_get_max_threads()));
-
-    auto data = make_storage<ElementType>(
-            svs::data::ConstSimpleDataView<float>(x, n, index->d), threadpool);
-
-    std::vector<size_t> labels(data.size());
-    std::iota(labels.begin(), labels.end(), 0);
-
-    return std::visit(
-            [&](auto&& distance) {
-                return new svs::DynamicVamana(
-                        svs::DynamicVamana::build<float>(
-                                std::move(get_build_parameters(*index)),
-                                std::move(data),
-                                std::move(labels),
-                                std::move(distance),
-                                std::move(threadpool)));
-            },
-            get_svs_distance(metric));
-}
-
-template <
-        typename T,
-        typename Alloc = svs::data::Blocked<svs::lib::Allocator<T>>>
-    requires std::is_floating_point_v<T> || std::is_same_v<T, svs::Float16>
-svs::VectorDataLoader<T> get_loader(const std::filesystem::path& path) {
-    return svs::VectorDataLoader<T>(path);
-}
-
-template <
-        typename T,
-        typename Alloc = svs::data::Blocked<svs::lib::Allocator<T>>>
-    requires std::is_integral_v<T>
-auto get_loader(const std::filesystem::path& path) {
-    using storage_type =
-            svs::quantization::scalar::SQDataset<T, svs::Dynamic, Alloc>;
-    return svs::lib::load_from_disk<storage_type>(path);
-}
-
-template <typename ElementType>
-svs::DynamicVamana* deserialize_impl_t(
-        const svs_io::SVSTempDirectory& tmp,
-        faiss::MetricType metric) {
-    auto threadpool = svs::threads::ThreadPoolHandle(
-            svs::threads::OMPThreadPool(omp_get_max_threads()));
-
-    return std::visit(
-            [&](auto&& distance) {
-                return new svs::DynamicVamana(
-                        svs::DynamicVamana::assemble<float>(
-                                tmp.config,
-                                svs::GraphLoader(tmp.graph.string()),
-                                get_loader<ElementType>(tmp.data),
-                                std::move(distance),
-                                std::move(threadpool)));
-            },
-            get_svs_distance(metric));
-}
-
 svs::index::vamana::VamanaSearchParameters make_search_parameters(
-        const IndexSVSVamana& index,
+        const IndexSVSVamana* idx,
         const SearchParameters* params) {
-    FAISS_THROW_IF_NOT(index.impl);
+    FAISS_THROW_IF_NOT(idx);
+    FAISS_THROW_IF_NOT(idx->impl);
 
-    auto search_window_size = index.search_window_size;
-    auto search_buffer_capacity = index.search_buffer_capacity;
+    auto search_window_size = idx->search_window_size;
+    auto search_buffer_capacity = idx->search_buffer_capacity;
 
-    if (auto svs_params =
-                dynamic_cast<const SearchParametersSVSVamana*>(params)) {
-        if (svs_params->search_window_size > 0)
-            search_window_size = svs_params->search_window_size;
-        if (svs_params->search_buffer_capacity > 0)
-            search_buffer_capacity = svs_params->search_buffer_capacity;
+    if (params != nullptr) {
+        auto* svs_params =
+                dynamic_cast<const SearchParametersSVSVamana*>(params);
+        if (svs_params != nullptr) {
+            if (svs_params->search_window_size > 0)
+                search_window_size = svs_params->search_window_size;
+            if (svs_params->search_buffer_capacity > 0)
+                search_buffer_capacity = svs_params->search_buffer_capacity;
+        }
     }
 
-    return index.impl->get_search_parameters().buffer_config(
+    return idx->impl->get_search_parameters().buffer_config(
             {search_window_size, search_buffer_capacity});
 }
 } // namespace
@@ -238,7 +105,7 @@ void IndexSVSVamana::search(
     FAISS_THROW_IF_NOT(k > 0);
     FAISS_THROW_IF_NOT(is_trained);
 
-    auto sp = make_search_parameters(*this, params);
+    auto sp = make_search_parameters(this, params);
 
     // Simple search
     if (params == nullptr || params->sel == nullptr) {
@@ -310,7 +177,7 @@ void IndexSVSVamana::range_search(
     FAISS_THROW_IF_NOT(is_trained);
     FAISS_THROW_IF_NOT(result->nq == n);
 
-    auto sp = make_search_parameters(*this, params);
+    auto sp = make_search_parameters(this, params);
     auto old_sp = impl->get_search_parameters();
     impl->set_search_parameters(sp);
 
@@ -325,19 +192,13 @@ void IndexSVSVamana::range_search(
     // Use search_buffer_capacity as a heuristic
     const auto result_capacity = sp.buffer_config_.get_total_capacity();
     for (auto& res : all_results) {
-        res.reserve(result_capacity);
+        res.reserve(search_buffer_capacity); // Reserve space for elements
     }
+    auto sel = params != nullptr ? params->sel : nullptr;
 
-    std::function<bool(float, float)> compare = std::visit(
-            [](auto&& dist) {
-                return std::function<bool(float, float)>{
-                        svs::distance::comparator(dist)};
-            },
-            get_svs_distance(metric_type));
-
-    std::function<bool(size_t)> select = [](size_t) { return true; };
-    if (params != nullptr && params->sel != nullptr) {
-        select = [&](size_t id) { return params->sel->is_member(id); };
+    std::function<bool(float, float)> cmp = std::greater<float>{};
+    if (is_similarity_metric(metric_type)) {
+        cmp = std::less<float>{};
     }
 
     // Set iterator batch size to search window size
