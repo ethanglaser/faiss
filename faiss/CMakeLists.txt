@@ -351,11 +351,63 @@ if(FAISS_ENABLE_SVS)
   find_package(svs REQUIRED)
   target_compile_options(svs::svs INTERFACE "-DSVS_ENABLE_OMP=1")
 
-  target_link_libraries(faiss PUBLIC svs::svs svs::svs_shared_library)
-  target_link_libraries(faiss_avx2 PUBLIC svs::svs svs::svs_shared_library)
-  target_link_libraries(faiss_avx512 PUBLIC svs::svs svs::svs_shared_library)
-  target_link_libraries(faiss_avx512_spr PUBLIC svs::svs svs::svs_shared_library)
-  target_link_libraries(faiss_sve PUBLIC svs::svs svs::svs_shared_library)
+  # Link SVS libraries privately for better LTO optimization
+  target_link_libraries(faiss PRIVATE svs::svs_static_library)
+  target_link_libraries(faiss_avx2 PRIVATE svs::svs_static_library)
+  target_link_libraries(faiss_avx512 PRIVATE svs::svs_static_library)
+  target_link_libraries(faiss_avx512_spr PRIVATE svs::svs_static_library)
+  target_link_libraries(faiss_sve PRIVATE svs::svs_static_library)
+
+  # But make SVS headers publicly available for SWIG and external users
+  target_link_libraries(faiss PUBLIC svs::svs)
+  target_link_libraries(faiss_avx2 PUBLIC svs::svs)
+  target_link_libraries(faiss_avx512 PUBLIC svs::svs)
+  target_link_libraries(faiss_avx512_spr PUBLIC svs::svs)
+  target_link_libraries(faiss_sve PUBLIC svs::svs)
+
+  # Enable LTO for optimal SVS performance (requires fat LTO objects in SVS)
+  include(CheckIPOSupported)
+  check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
+
+  if(ipo_supported)
+    message(STATUS "SVS: Enabling LTO with fat objects for cross-library optimization")
+
+    # Use explicit LTO flags instead of INTERPROCEDURAL_OPTIMIZATION to control fat objects
+    target_compile_options(faiss PRIVATE -flto=auto -ffat-lto-objects)
+    target_compile_options(faiss_avx2 PRIVATE -flto=auto -ffat-lto-objects)
+    target_compile_options(faiss_avx512 PRIVATE -flto=auto -ffat-lto-objects)
+    target_compile_options(faiss_avx512_spr PRIVATE -flto=auto -ffat-lto-objects)
+    target_compile_options(faiss_sve PRIVATE -flto=auto -ffat-lto-objects)
+
+    # Also enable LTO for linking with weak symbol conversion
+    target_link_options(faiss PRIVATE -flto=auto)
+    target_link_options(faiss_avx2 PRIVATE -flto=auto)
+    target_link_options(faiss_avx512 PRIVATE -flto=auto)
+    target_link_options(faiss_avx512_spr PRIVATE -flto=auto)
+    target_link_options(faiss_sve PRIVATE -flto=auto)
+
+    # Create a function to apply LTO flags to SWIG targets (called from python/CMakeLists.txt)
+    function(configure_svs_lto_for_swig_targets)
+      if(ipo_supported AND FAISS_ENABLE_SVS)
+        message(STATUS "SVS: Applying LTO flags to SWIG targets for cross-library optimization")
+
+        # Apply LTO flags to SWIG targets if they exist
+        foreach(target_name swigfaiss swigfaiss_avx2 swigfaiss_avx512 swigfaiss_avx512_spr swigfaiss_sve)
+          if(TARGET ${target_name})
+            target_compile_options(${target_name} PRIVATE -flto=auto -ffat-lto-objects)
+            target_link_options(${target_name} PRIVATE -flto=auto)
+            message(STATUS "SVS: Applied LTO flags to ${target_name}")
+          endif()
+        endforeach()
+      endif()
+    endfunction()
+
+    # Add post-build step to convert weak symbols to strong symbols in SVS static library
+    set(CONVERT_SCRIPT "${PROJECT_SOURCE_DIR}/cmake/convert_weak_symbols.sh")
+    set(SVS_LIB_PATH "${PROJECT_BINARY_DIR}/_deps/svs-src/lib/libsvs_static_library.a")
+  else()
+    message(WARNING "SVS: LTO not supported - performance may be suboptimal: ${ipo_error}")
+  endif()
 endif()
 
 # Handle `#include <faiss/foo.h>`.
@@ -425,7 +477,9 @@ target_compile_definitions(faiss_avx512 PRIVATE FINTEGER=int)
 target_compile_definitions(faiss_avx512_spr PRIVATE FINTEGER=int)
 target_compile_definitions(faiss_sve PRIVATE FINTEGER=int)
 
-if(FAISS_USE_LTO)
+# SVS integration provides its own LTO configuration with fat objects for cross-library optimization
+# The standard FAISS_USE_LTO section is disabled to avoid conflicting LTO flags
+if(FAISS_USE_LTO AND NOT FAISS_ENABLE_SVS)
   include(CheckIPOSupported)
   check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
 
@@ -438,6 +492,8 @@ if(FAISS_USE_LTO)
   else()
     message(STATUS "LTO not supported: <${ipo_error}>")
   endif()
+elseif(FAISS_USE_LTO AND FAISS_ENABLE_SVS)
+  message(STATUS "FAISS_USE_LTO disabled - using SVS-optimized LTO configuration with fat objects")
 endif()
 
 find_package(OpenMP REQUIRED)

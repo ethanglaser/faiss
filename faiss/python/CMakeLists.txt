@@ -305,6 +305,11 @@ target_link_libraries(swigfaiss_avx512_spr PRIVATE faiss_python_callbacks)
 target_link_libraries(swigfaiss_sve PRIVATE faiss_python_callbacks)
 target_link_libraries(faiss_example_external_module PRIVATE faiss_python_callbacks)
 
+# Apply SVS LTO configuration to SWIG targets for cross-library optimization
+if(COMMAND configure_svs_lto_for_swig_targets)
+  configure_svs_lto_for_swig_targets()
+endif()
+
 configure_file(setup.py setup.py COPYONLY)
 configure_file(__init__.py __init__.py COPYONLY)
 configure_file(loader.py loader.py COPYONLY)
